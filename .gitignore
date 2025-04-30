@@ -1,5 +1,6 @@
 # Connect API key
-connect_api_key.json
+*api_key*
+!api_keys_TEMPLATE.json
 
 # IDE
 .idea/
