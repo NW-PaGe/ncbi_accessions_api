@@ -22,7 +22,7 @@ url = ENDPOINT + 'fetch-accession/?terms=' + ','.join(terms)
 # Set the headers, including the Posit Connect api key which will be read in from the local json file
 headers = {
     'accept': 'application/json',
-    'Authorization': f'Key {pl.read_json('connect_api_key.json')['connect_api_key'][0]}'  # Pull in API key
+    'Authorization': f'Key {pl.read_json('../api_keys.json')['connect_api_key'][0]}'  # Pull in API key
 }
 
 # Send GET request

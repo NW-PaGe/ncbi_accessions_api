@@ -4,8 +4,12 @@ import polars as pl
 import glob
 import os
 
-# Set NCBI API key here
-NCBI_API_KEY = None
+# Get api keys
+keys = pl.read_json('../api_keys.json')
+# Connect key
+connect_key = keys['connect_api_key'][0]
+# NCBI Key
+ncbi_key = keys['ncbi_api_key'][0]
 
 # Read in GenBank strain names
 strains = pl.read_csv('data/genbank_strains.csv')['SEQUENCE_GENBANK_STRAIN']
@@ -17,7 +21,7 @@ print(f"Seed: {seed}")
 # Set the headers, including the Posit Connect api key which will be read in from the local json file
 headers = {
     'accept': 'application/json',
-    'Authorization': f'Key {pl.read_json('connect_api_key.json')['connect_api_key'][0]}'  # Pull in API key
+    'Authorization': f'Key {connect_key}'  # Pull in API key
 }
 # API endpoint
 endpoint = 'https://server/ncbi/'
@@ -33,7 +37,7 @@ while (batch_count * num_workers) < final_count:
             endpoint
             + 'fetch-accession/?terms='
             + ','.join(terms)  # Add terms
-            + (f'&api_key={NCBI_API_KEY}' if NCBI_API_KEY else '')  # Add NCBI api key if present
+            + (f'&api_key={ncbi_key}' if ncbi_key not in ['your_key_here', '', None] else '')  # Add NCBI api key if present
     )
 
     # Send GET request
