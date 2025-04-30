@@ -2,7 +2,6 @@ import asyncio
 import aiohttp
 import re
 from fastapi import FastAPI, Query
-import warnings
 
 # Constants for timeout, retry settings
 MAX_RETRIES = 5
@@ -12,6 +11,7 @@ REQUEST_DELAY = 0.5
 # Pattern to check against returned accessions
 # A12345 or AB123456 or AB12345678
 ACCESSION_PATTERN = r'^[A-Za-z]\d{5}\.|^[A-Za-z]{2}\d{6}\.|^[A-Za-z]{2}\d{8}\.'
+
 
 app = FastAPI()
 
@@ -40,8 +40,6 @@ async def fetch_accession(
     - The keys are the search terms.
     - The values are their corresponding accession numbers.
     """
-    print('Testing changes')
-    warnings.warn('Testing warnings')
     # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
     terms_list = [term.strip() for term in terms.split(",")]
     results = await fetch_all_nuccore(
