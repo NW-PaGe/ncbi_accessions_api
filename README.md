@@ -45,7 +45,7 @@ Example:
 
 ## Example Usage
 
-### Example Python Script: [`example.py`](example.py)
+### Example Python Script: [`example.py`](example/example.py)
 
 This py script contains an example of how to use the API with a Python script.
 
@@ -82,7 +82,7 @@ shape: (20, 2)
 
 Testing the API vs a direct join on a lookup table containing GenBank strains and accessions resulted in 100% congruence across 100,000 terms. [get_responses.py](validation/get_responses.py) was used to retrieve the API outputs, and [validation.py](validation/validation.py) was used to identify API accuracy and generate plots.
 
-<p align="left"><img src="api_correct.png" alt="API Correct" width="80%" /></p>
+<p align="left"><img src="validation/api_correct.png" alt="API Correct" width="80%" /></p>
 
 ## Contributing
 

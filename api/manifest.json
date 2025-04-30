@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "locale": "English_United States.1252",
+  "metadata": {
+    "appmode": "python-fastapi",
+    "entrypoint": "main"
+  },
+  "python": {
+    "version": "3.12.9",
+    "package_manager": {
+      "name": "pip",
+      "version": "23.2.1",
+      "package_file": "requirements.txt"
+    }
+  },
+  "files": {
+    "requirements.txt": {
+      "checksum": "8357e0b0af3dac319592955fcdc30c44"
+    },
+    "main.py": {
+      "checksum": "a72c650bbe5dca18f21397e11e1012d1"
+    }
+  }
+}

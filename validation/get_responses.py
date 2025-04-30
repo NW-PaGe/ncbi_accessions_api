@@ -17,7 +17,7 @@ headers = {
     'Authorization': f'Key {pl.read_json('connect_api_key.json')['connect_api_key'][0]}'  # Pull in API key
 }
 # API endpoint
-endpoint = 'https://qa-connect.doh.wa.lcl/ncbi/fetch-accession/'
+endpoint = 'https://server/ncbi/'
 num_workers = 200
 batch_count = 0
 final_count = 100000
@@ -26,7 +26,7 @@ while (batch_count * num_workers) < final_count:
     terms = strains.sample(num_workers)
 
     # Add terms to search for
-    url = endpoint + '?terms=' + ','.join(terms) + '&api_key=cb4d51d7c1c59e5849197c246e3a5ddab508'
+    url = endpoint + 'fetch-accession/?terms=' + ','.join(terms) + '&api_key=cb4d51d7c1c59e5849197c246e3a5ddab508'
 
     # Send GET request
     response = requests.get(url, headers=headers, verify=False, timeout=300)  # verify set to false due to SSL cert failures
