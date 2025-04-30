@@ -17,7 +17,8 @@ app = FastAPI()
 
 @app.get("/fetch-accession/")
 async def fetch_accession(
-    terms: str = Query(default=..., description="Search term to retrieve accession numbers", examples=["WA-PHL-007327"]),
+    terms: str = Query(default=..., description="Search term to retrieve accession numbers",
+                       examples=["WA-PHL-007327"], example="WA-PHL-007327, USA/WA-PHL-007328/2021"),
     api_key: str = Query(default=None, description="User's NCBI API key"),
     timeout: int = Query(default=REQUEST_TIMEOUT, description="Timeout for requests"),
     num_workers: int = Query(default=5, description="Number of concurrent workers"),
