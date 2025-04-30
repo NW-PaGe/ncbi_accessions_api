@@ -4,6 +4,9 @@ import polars as pl
 import glob
 import os
 
+# Set NCBI API key here
+NCBI_API_KEY = None
+
 # Read in GenBank strain names
 strains = pl.read_csv('data/genbank_strains.csv')['SEQUENCE_GENBANK_STRAIN']
 
@@ -26,7 +29,12 @@ while (batch_count * num_workers) < final_count:
     terms = strains.sample(num_workers)
 
     # Add terms to search for
-    url = endpoint + 'fetch-accession/?terms=' + ','.join(terms) + '&api_key=cb4d51d7c1c59e5849197c246e3a5ddab508'
+    url = (
+            endpoint
+            + 'fetch-accession/?terms='
+            + ','.join(terms)  # Add terms
+            + (f'&api_key={NCBI_API_KEY}' if NCBI_API_KEY else '')  # Add NCBI api key if present
+    )
 
     # Send GET request
     response = requests.get(url, headers=headers, verify=False, timeout=300)  # verify set to false due to SSL cert failures
