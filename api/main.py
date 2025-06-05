@@ -1,7 +1,10 @@
 import asyncio
 import aiohttp
 import re
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Depends
+from pydantic import BaseModel, Field
+from typing import Optional
+
 
 # Constants for timeout, retry settings
 MAX_RETRIES = 5
@@ -12,19 +15,44 @@ REQUEST_DELAY = 0.5
 # A12345 or AB123456 or AB12345678
 ACCESSION_PATTERN = r'^[A-Za-z]\d{5}\.|^[A-Za-z]{2}\d{6}\.|^[A-Za-z]{2}\d{8}\.'
 
-
 app = FastAPI()
+
+class FetchAccessionParams(BaseModel):
+    """
+    Pydantic class for validating parameter inputs. terms is removed and called directly in fetch_accessions since
+    that was required to display examples in the swagger ui.
+    """
+    # terms: str = Field(
+    #     ...,
+    #     description="Search term(s) to retrieve accession numbers. Separate multiple terms with commas.",
+    #     examples=["WA-PHL-007327", "USA/WA-PHL-007328/2021"]
+    # )
+    api_key: Optional[str] = Field(None, description="User's NCBI API key", nullable=True)
+    timeout: int = Field(REQUEST_TIMEOUT, ge=0, le=500, description="Timeout for requests in seconds")
+    num_workers: int = Field(5, ge=1, le=10, description="Number of concurrent workers")
+    max_retries: int = Field(MAX_RETRIES, ge=0, le=10, description="Maximum number of retries per term")
+    request_delay: float = Field(REQUEST_DELAY, ge=0.001, le=60, description="Delay between requests in seconds")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": [
+                {
+                    "terms": "WA-PHL-007327, USA/WA-PHL-007328/2021"
+                }
+            ]
+        }
+    }
+
 
 @app.get("/fetch-accession/")
 async def fetch_accession(
-    terms: str = Query(default=..., description="Search term to retrieve accession numbers",
-                       examples=["WA-PHL-007327"], example="WA-PHL-007327, USA/WA-PHL-007328/2021"),
-    api_key: str = Query(default=None, description="User's NCBI API key"),
-    timeout: int = Query(default=REQUEST_TIMEOUT, description="Timeout for requests"),
-    num_workers: int = Query(default=5, description="Number of concurrent workers"),
-    max_retries: int = Query(default=MAX_RETRIES, description="Maximum number of retries per term"),
-    request_delay: int | float = Query(default=REQUEST_DELAY, description="Delay between requests (in seconds)")
-) -> dict[str, str | None]:
+        terms: str = Query(...,
+                           description="Search term(s) to retrieve accession numbers. Separate multiple terms with commas.",
+                           example="WA-PHL-007327,USA/WA-PHL-007328/2021",
+                           examples=["WA-PHL-007327", "USA/WA-PHL-007328/2021"]
+                           ),
+        params: FetchAccessionParams = Depends()
+):
     """ Fetches GenBank accession numbers for the provided search terms.
 
     ## Parameters
@@ -40,11 +68,14 @@ async def fetch_accession(
     - The keys are the search terms.
     - The values are their corresponding accession numbers.
     """
-    # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
-    terms_list = [term.strip() for term in terms.split(",")]
     results = await fetch_all_nuccore(
-        terms=terms_list, api_key=api_key, timeout=timeout, num_workers=num_workers,
-        max_retries=max_retries, request_delay=request_delay
+        # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
+        terms=[term.strip() for term in terms.split(",")],
+        api_key=params.api_key,
+        timeout=params.timeout,
+        num_workers=params.num_workers,
+        max_retries=params.max_retries,
+        request_delay=params.request_delay
     )
     return results
 
