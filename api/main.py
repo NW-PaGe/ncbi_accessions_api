@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 import re
 from fastapi import FastAPI, Query, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, RootModel
 from typing import Optional
 
 
@@ -10,6 +10,7 @@ from typing import Optional
 MAX_RETRIES = 5
 REQUEST_TIMEOUT = 15
 REQUEST_DELAY = 0.5
+NUM_WORKERS = 5
 
 # Pattern to check against returned accessions
 # A12345 or AB123456 or AB12345678
@@ -18,9 +19,16 @@ ACCESSION_PATTERN = r'^[A-Za-z]\d{5}\.|^[A-Za-z]{2}\d{6}\.|^[A-Za-z]{2}\d{8}\.'
 app = FastAPI()
 
 class FetchAccessionParams(BaseModel):
-    """
+    f"""
     Pydantic class for validating parameter inputs. terms is removed and called directly in fetch_accessions since
     that was required to display examples in the swagger ui.
+    
+    Fields:
+        api_key (str, default=None): User's NCBI API key.
+        timeout (int, default={REQUEST_TIMEOUT}): Timeout for requests in seconds.
+        num_workers (int, default={NUM_WORKERS}): Number of concurrent workers.
+        max_retries (int, default={MAX_RETRIES}): Maximum number of retries per term.
+        request_delay (float, default={REQUEST_DELAY}): Delay between requests in seconds
     """
     # terms: str = Field(
     #     ...,
@@ -29,22 +37,23 @@ class FetchAccessionParams(BaseModel):
     # )
     api_key: Optional[str] = Field(None, description="User's NCBI API key", nullable=True)
     timeout: int = Field(REQUEST_TIMEOUT, ge=0, le=500, description="Timeout for requests in seconds")
-    num_workers: int = Field(5, ge=1, le=10, description="Number of concurrent workers")
+    num_workers: int = Field(NUM_WORKERS, ge=1, le=10, description="Number of concurrent workers")
     max_retries: int = Field(MAX_RETRIES, ge=0, le=10, description="Maximum number of retries per term")
     request_delay: float = Field(REQUEST_DELAY, ge=0.001, le=60, description="Delay between requests in seconds")
 
+
+class FetchAccessionResponse(RootModel[dict[str, Optional[str]]]):
     model_config = {
         "json_schema_extra": {
-            "example": [
-                {
-                    "terms": "WA-PHL-007327, USA/WA-PHL-007328/2021"
-                }
-            ]
+            "example": {
+                "WA-PHL-007327": "PQ880188.1",
+                "USA/WA-PHL-007328/2021": "PQ880189.1"
+            }
         }
     }
 
 
-@app.get("/fetch-accession/")
+@app.get("/fetch-accession/", response_model=FetchAccessionResponse)
 async def fetch_accession(
         terms: str = Query(...,
                            description="Search term(s) to retrieve accession numbers. Separate multiple terms with commas.",
@@ -53,15 +62,15 @@ async def fetch_accession(
                            ),
         params: FetchAccessionParams = Depends()
 ):
-    """ Fetches GenBank accession numbers for the provided search terms.
+    f""" Fetches GenBank accession numbers for the provided search terms.
 
     ## Parameters
     - **terms** (`str`, *required*): Search term to retrieve accession numbers.
     - **api_key** (`str`, *optional*): User's NCBI API key.
-    - **timeout** (`int`, *optional*, default=`15`): Timeout for requests in seconds.
-    - **num_workers** (`int`, *optional*, default=`5`): Number of concurrent workers.
-    - **max_retries** (`int`, *optional*, default=`5`): Maximum number of retries per term.
-    - **request_delay** (`int | float`, *optional*, default=`0.5`): Delay between requests in seconds.
+    - **timeout** (`int`, *optional*, default=`{REQUEST_TIMEOUT}`): Timeout for requests in seconds.
+    - **num_workers** (`int`, *optional*, default=`{NUM_WORKERS}`): Number of concurrent workers.
+    - **max_retries** (`int`, *optional*, default=`{MAX_RETRIES}`): Maximum number of retries per term.
+    - **request_delay** (`float`, *optional*, default=`{REQUEST_DELAY}`): Delay between requests in seconds.
 
     ## Returns
     A `dict` containing the results, where:
@@ -71,42 +80,41 @@ async def fetch_accession(
     results = await fetch_all_nuccore(
         # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
         terms=[term.strip() for term in terms.split(",")],
-        api_key=params.api_key,
-        timeout=params.timeout,
-        num_workers=params.num_workers,
-        max_retries=params.max_retries,
-        request_delay=params.request_delay
+        params=params
     )
     return results
 
 
-async def fetch_nuccore(term, session, semaphore=None, api_key=None, timeout=REQUEST_TIMEOUT, max_retries=MAX_RETRIES, request_delay=REQUEST_DELAY):
+async def fetch_nuccore(term: str,
+                        params: FetchAccessionParams,
+                        session: aiohttp.ClientSession,
+                        semaphore: asyncio.Semaphore | None = None):
     """ Fetches GenBank accession information for a given term using the NCBI Entrez API.
 
     Parameters:
         term (str): The search term to use for fetching GenBank data.
+        params (FetchAccessionParams): The parameters set by the API call.
         session (aiohttp.ClientSession): The active HTTP session to send requests.
         semaphore (asyncio.Semaphore | None): A semaphore to limit concurrent requests (default is None).
-        api_key (str | None): The NCBI API key to use (optional).
-        timeout (int): The timeout for each request (default is 15 seconds).
-        max_retries (int): The maximum number of retries in case of failure (default is 5).
-        request_delay (int): Delay between requests (default is 0.5 seconds).
 
     Returns:
         Tuple[str, str | None]: A tuple containing the search term and the accession result. If no result is found, the accession result is None.
     """
     eutils = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils'
     retries = 0
-    api_key_flag = f'api_key={api_key}' if api_key else ''
+    api_key_flag = f'api_key={params.api_key}' if params.api_key else ''
 
     # Set title term to match on
     title_term = term if '/' in term else f'/{term}/'
 
     async with semaphore:
-        while retries < max_retries:
+        while retries < params.max_retries:
             try:
-                async with asyncio.timeout(timeout):
-                    data = await fetch_data(session, f'{eutils}/esearch.fcgi?db=nuccore&term={term}&retmode=json&{api_key_flag}', retries, request_delay)
+                async with asyncio.timeout(params.timeout):
+                    data = await fetch_data(session=session,
+                                            url=f'{eutils}/esearch.fcgi?db=nuccore&term={term}&retmode=json&{api_key_flag}',
+                                            retries=retries,
+                                            params=params)
 
                 id_list = data.get('esearchresult', {}).get('idlist', [])
                 if not id_list:
@@ -115,7 +123,10 @@ async def fetch_nuccore(term, session, semaphore=None, api_key=None, timeout=REQ
                     id_list = id_list[:10]
 
                 for uid in id_list:
-                    summary_data = await fetch_data(session, f'{eutils}/esummary.fcgi?db=nuccore&id={uid}&retmode=json&{api_key_flag}', retries, request_delay)
+                    summary_data = await fetch_data(session=session,
+                                                    url=f'{eutils}/esummary.fcgi?db=nuccore&id={uid}&retmode=json&{api_key_flag}',
+                                                    retries=retries,
+                                                    params=params)
                     accession_result = summary_data['result'].get(uid, {}).get('accessionversion')
                     title_result = summary_data['result'].get(uid, {}).get('title')
 
@@ -132,18 +143,18 @@ async def fetch_nuccore(term, session, semaphore=None, api_key=None, timeout=REQ
                 print(f'!!! Unexpected error fetching {term}: {e}')
                 return term, None
 
-    print(f'!!! Failed after {max_retries} retries: {term}')
+    print(f'!!! Failed after {params.max_retries} retries: {term}')
     return term, None
 
 
-async def fetch_data(session, url, retries, request_delay):
+async def fetch_data(session, url, retries, params):
     """ Fetches data from the given URL with retry logic for rate limits or transient errors.
 
     Parameters:
         session (aiohttp.ClientSession): The active HTTP session to send requests.
         url (str): The URL to fetch data from.
         retries (int): The current retry attempt (used for rate limiting).
-        request_delay (int): Delay between requests.
+        params (FetchAccessionParams): API query parameters.
 
     Returns:
         dict: The JSON data returned from the request.
@@ -154,13 +165,13 @@ async def fetch_data(session, url, retries, request_delay):
     """
     try:
         async with session.get(url, timeout=REQUEST_TIMEOUT) as response:
-            await asyncio.sleep(request_delay)
+            await asyncio.sleep(params.request_delay)
             data = await response.json()
 
             if 'error' in data and 'API rate limit exceeded' in data['error']:
                 wait_time = 2 ** retries
                 await asyncio.sleep(wait_time)
-                return await fetch_data(session, url, retries + 1, request_delay)
+                return await fetch_data(session=session, url=url, retries=retries + 1, params=params)
             return data
 
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
@@ -183,16 +194,12 @@ async def handle_retry_error(error, retries):
     return wait_time
 
 
-async def fetch_all_nuccore(terms, api_key, timeout=15, num_workers=5, max_retries=MAX_RETRIES, request_delay=REQUEST_DELAY):
+async def fetch_all_nuccore(terms, params):
     """ Fetches GenBank accession numbers for a list of terms in parallel using asynchronous workers.
 
     Parameters:
         terms (list | str): A search term or comma-separated search terms.
-        api_key (str | None): The NCBI API key for authentication (optional).
-        timeout (int): The timeout for requests (default is 15 seconds).
-        num_workers (int): Number of concurrent workers (default is 5).
-        max_retries (int): The maximum number of retries for failed requests (default is 5).
-        request_delay (int): Delay between requests in seconds (default is 1).
+        params (FetchAccessionParams): API query parameters
 
     Returns:
         dict: A dictionary where each key is a term, and each value is its corresponding GenBank accession result.
@@ -216,16 +223,13 @@ async def fetch_all_nuccore(terms, api_key, timeout=15, num_workers=5, max_retri
                        session=session,
                        results=results,
                        semaphore=semaphore,
-                       api_key=api_key,
-                       timeout=timeout,
-                       max_retries=max_retries,
-                       request_delay=request_delay)
-            ) for _ in range(num_workers)
+                       params=params)
+            ) for _ in range(params.num_workers)
         ]
 
         await queue.join()
 
-        for _ in range(num_workers):
+        for _ in range(params.num_workers):
             queue.put_nowait(None)
 
         await asyncio.gather(*workers, return_exceptions=True)
@@ -233,7 +237,7 @@ async def fetch_all_nuccore(terms, api_key, timeout=15, num_workers=5, max_retri
     return results
 
 
-async def worker(queue, session, results, semaphore, api_key, timeout, max_retries, request_delay):
+async def worker(queue, session, results, semaphore, params):
     """ Worker function to process tasks from the queue asynchronously.
 
     Parameters:
@@ -241,10 +245,7 @@ async def worker(queue, session, results, semaphore, api_key, timeout, max_retri
         session (aiohttp.ClientSession): The active HTTP session to send requests.
         results (dict): A dictionary to store the results (term -> accession).
         semaphore (asyncio.Semaphore): A semaphore to limit concurrent requests.
-        api_key (str | None): The NCBI API key for authentication.
-        timeout (int): The timeout for each request.
-        max_retries (int): The maximum number of retries in case of failure.
-        request_delay (int): The delay between requests.
+        params (FetchAccessionParams): API query parameters
 
     Returns:
         None: The results are stored in the `results` dictionary.
@@ -258,12 +259,9 @@ async def worker(queue, session, results, semaphore, api_key, timeout, max_retri
         try:
             term, result = await fetch_nuccore(
                 term=term,
+                params=params,
                 session=session,
-                semaphore=semaphore,
-                api_key=api_key,
-                timeout=timeout,
-                max_retries=max_retries,
-                request_delay=request_delay
+                semaphore=semaphore
             )
             results[term] = result
         except Exception as e:
