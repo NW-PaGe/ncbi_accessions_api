@@ -152,6 +152,7 @@ async def fetch_db(term: str,
 
     # Set title term to match on
     title_term = term if '/' in term else f'/{term}/'
+    title_term = re.sub(r'/+', '/', title_term)  # dedup slashes
 
     async with semaphore:
         while retries < params.max_retries:
@@ -186,7 +187,8 @@ async def fetch_db(term: str,
 
                     accession_result = summary_data['result'].get(uid, {}).get(accession_tag)
                     title_result = summary_data['result'].get(uid, {}).get(strain_tag)
-
+                    title_result = re.sub(r'/+', '/', title_result)  # dedup slashes
+                    
                     if accession_result and re.match(accession_re, accession_result) and title_term in title_result:
                         return term, accession_result
 
