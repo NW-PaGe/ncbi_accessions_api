@@ -35,7 +35,7 @@ while (batch_count * num_workers) < final_count:
     # Add terms to search for
     url = (
             endpoint
-            + 'fetch-accession/?terms='
+            + 'fetch-nucleotide-accession/?terms='
             + ','.join(terms)  # Add terms
             + (f'&api_key={ncbi_key}' if ncbi_key not in ['your_key_here', '', None] else '')  # Add NCBI api key if present
     )

@@ -17,7 +17,7 @@ print(f"Seed: {seed}")
 terms = strains.sample(20, seed=seed)
 
 # Add terms to search for
-url = ENDPOINT + 'fetch-accession/?terms=' + ','.join(terms)
+url = ENDPOINT + 'fetch-nucleotide-accession/?terms=' + ','.join(terms)
 
 # Set the headers, including the Posit Connect api key which will be read in from the local json file
 headers = {

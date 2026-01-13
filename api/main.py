@@ -20,7 +20,7 @@ app = FastAPI()
 
 class FetchAccessionParams(BaseModel):
     f"""
-    Pydantic class for validating parameter inputs. terms is removed and called directly in fetch_accessions since
+    Pydantic class for validating parameter inputs. terms is removed and called directly in fetch_nucleotide_accessions since
     that was required to display examples in the swagger ui.
     
     Fields:
@@ -53,8 +53,8 @@ class FetchAccessionResponse(RootModel[dict[str, Optional[str]]]):
     }
 
 
-@app.get("/fetch-accession/", response_model=FetchAccessionResponse)
-async def fetch_accession(
+@app.get("/fetch-nucleotide-accession/", response_model=FetchAccessionResponse)
+async def fetch_nucleotide_accession(
         terms: str = Query(...,
                            description="Search term(s) to retrieve accession numbers. Separate multiple terms with commas.",
                            example="WA-PHL-007327,USA/WA-PHL-007328/2021",
@@ -77,23 +77,26 @@ async def fetch_accession(
     - The keys are the search terms.
     - The values are their corresponding accession numbers.
     """
-    results = await fetch_all_nuccore(
+    results = await fetch_all_db(
         # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
-        terms=[term.strip() for term in terms.split(",")],
-        params=params
+        terms=[term.strip() for term in terms.split(',')],
+        params=params,
+        db='nucleotide'
     )
     return results
 
 
-async def fetch_nuccore(term: str,
-                        params: FetchAccessionParams,
-                        session: aiohttp.ClientSession,
-                        semaphore: asyncio.Semaphore | None = None):
-    """ Fetches GenBank accession information for a given term using the NCBI Entrez API.
+async def fetch_db(term: str,
+                   params: FetchAccessionParams,
+                   db: str,
+                   session: aiohttp.ClientSession,
+                   semaphore: asyncio.Semaphore | None = None):
+    """ Fetches database accession information for a given term using the NCBI Entrez API.
 
     Parameters:
-        term (str): The search term to use for fetching GenBank data.
+        term (str): The search term to use for fetching database data.
         params (FetchAccessionParams): The parameters set by the API call.
+        db (str): The NCBI database to search within. Must equal one of the databases listed by https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo (e.g., nucleotide, biosample, sra)
         session (aiohttp.ClientSession): The active HTTP session to send requests.
         semaphore (asyncio.Semaphore | None): A semaphore to limit concurrent requests (default is None).
 
@@ -112,7 +115,7 @@ async def fetch_nuccore(term: str,
             try:
                 async with asyncio.timeout(params.timeout):
                     data = await fetch_data(session=session,
-                                            url=f'{eutils}/esearch.fcgi?db=nuccore&term={term}&retmode=json&{api_key_flag}',
+                                            url=f'{eutils}/esearch.fcgi?db={db}&term={term}&retmode=json&{api_key_flag}',
                                             retries=retries,
                                             params=params)
 
@@ -124,7 +127,7 @@ async def fetch_nuccore(term: str,
 
                 for uid in id_list:
                     summary_data = await fetch_data(session=session,
-                                                    url=f'{eutils}/esummary.fcgi?db=nuccore&id={uid}&retmode=json&{api_key_flag}',
+                                                    url=f'{eutils}/esummary.fcgi?db={db}&id={uid}&retmode=json&{api_key_flag}',
                                                     retries=retries,
                                                     params=params)
                     accession_result = summary_data['result'].get(uid, {}).get('accessionversion')
@@ -194,15 +197,16 @@ async def handle_retry_error(error, retries):
     return wait_time
 
 
-async def fetch_all_nuccore(terms, params):
-    """ Fetches GenBank accession numbers for a list of terms in parallel using asynchronous workers.
+async def fetch_all_db(terms, params, db):
+    """ Fetches database accession numbers for a list of terms in parallel using asynchronous workers.
 
     Parameters:
         terms (list | str): A search term or comma-separated search terms.
-        params (FetchAccessionParams): API query parameters
+        params (FetchAccessionParams): API query parameters.
+        db (str): The NCBI database to search within.
 
     Returns:
-        dict: A dictionary where each key is a term, and each value is its corresponding GenBank accession result.
+        dict: A dictionary where each key is a term, and each value is its corresponding database accession result.
     """
     queue = asyncio.Queue()
     results = {}
@@ -223,7 +227,8 @@ async def fetch_all_nuccore(terms, params):
                        session=session,
                        results=results,
                        semaphore=semaphore,
-                       params=params)
+                       params=params,
+                       db=db)
             ) for _ in range(params.num_workers)
         ]
 
@@ -237,7 +242,7 @@ async def fetch_all_nuccore(terms, params):
     return results
 
 
-async def worker(queue, session, results, semaphore, params):
+async def worker(queue, session, results, semaphore, params, db):
     """ Worker function to process tasks from the queue asynchronously.
 
     Parameters:
@@ -245,7 +250,8 @@ async def worker(queue, session, results, semaphore, params):
         session (aiohttp.ClientSession): The active HTTP session to send requests.
         results (dict): A dictionary to store the results (term -> accession).
         semaphore (asyncio.Semaphore): A semaphore to limit concurrent requests.
-        params (FetchAccessionParams): API query parameters
+        params (FetchAccessionParams): API query parameters.
+        db (str): The NCBI database to search within.
 
     Returns:
         None: The results are stored in the `results` dictionary.
@@ -257,9 +263,10 @@ async def worker(queue, session, results, semaphore, params):
             break
 
         try:
-            term, result = await fetch_nuccore(
+            term, result = await fetch_db(
                 term=term,
                 params=params,
+                db=db,
                 session=session,
                 semaphore=semaphore
             )
