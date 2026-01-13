@@ -14,7 +14,8 @@ NUM_WORKERS = 5
 
 # Pattern to check against returned accessions
 # A12345 or AB123456 or AB12345678
-ACCESSION_PATTERN = r'^[A-Za-z]\d{5}\.|^[A-Za-z]{2}\d{6}\.|^[A-Za-z]{2}\d{8}\.'
+ACCESSION_PATTERN_NUCLEOTIDE = r'^[A-Za-z]\d{5}\.|^[A-Za-z]{2}\d{6}\.|^[A-Za-z]{2}\d{8}\.'
+ACCESSION_PATTERN_BIOSAMPLE = r'SAMN\d{3,}'
 
 app = FastAPI()
 
@@ -42,7 +43,7 @@ class FetchAccessionParams(BaseModel):
     request_delay: float = Field(REQUEST_DELAY, ge=0.001, le=60, description="Delay between requests in seconds")
 
 
-class FetchAccessionResponse(RootModel[dict[str, Optional[str]]]):
+class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -52,8 +53,7 @@ class FetchAccessionResponse(RootModel[dict[str, Optional[str]]]):
         }
     }
 
-
-@app.get("/fetch-nucleotide-accession/", response_model=FetchAccessionResponse)
+@app.get("/fetch-nucleotide-accession/", response_model=FetchNucleotideAccessionResponse)
 async def fetch_nucleotide_accession(
         terms: str = Query(...,
                            description="Search term(s) to retrieve accession numbers. Separate multiple terms with commas.",
@@ -82,6 +82,49 @@ async def fetch_nucleotide_accession(
         terms=[term.strip() for term in terms.split(',')],
         params=params,
         db='nucleotide'
+    )
+    return results
+
+
+class FetchBioSampleAccessionResponse(RootModel[dict[str, Optional[str]]]):
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "WAPHL-188937": "SAMN51251905",
+                "WNV/USA/WAPHL-520992/2025": "SAMN51590889"
+            }
+        }
+    }
+
+@app.get("/fetch-biosample-accession/", response_model=FetchBioSampleAccessionResponse)
+async def fetch_biosample_accession(
+        terms: str = Query(...,
+                           description="Search term(s) to retrieve accession numbers. Separate multiple terms with commas.",
+                           example="WAPHL-188937,WNV/USA/WAPHL-520992/2025",
+                           examples=["WAPHL-188937", "WNV/USA/WAPHL-520992/2025"]
+                           ),
+        params: FetchAccessionParams = Depends()
+):
+    f""" Fetches BioSample accession numbers for the provided search terms.
+
+    ## Parameters
+    - **terms** (`str`, *required*): Search term to retrieve accession numbers.
+    - **api_key** (`str`, *optional*): User's NCBI API key.
+    - **timeout** (`int`, *optional*, default=`{REQUEST_TIMEOUT}`): Timeout for requests in seconds.
+    - **num_workers** (`int`, *optional*, default=`{NUM_WORKERS}`): Number of concurrent workers.
+    - **max_retries** (`int`, *optional*, default=`{MAX_RETRIES}`): Maximum number of retries per term.
+    - **request_delay** (`float`, *optional*, default=`{REQUEST_DELAY}`): Delay between requests in seconds.
+
+    ## Returns
+    A `dict` containing the results, where:
+    - The keys are the search terms.
+    - The values are their corresponding accession numbers.
+    """
+    results = await fetch_all_db(
+        # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
+        terms=[term.strip() for term in terms.split(',')],
+        params=params,
+        db='biosample'
     )
     return results
 
@@ -130,10 +173,21 @@ async def fetch_db(term: str,
                                                     url=f'{eutils}/esummary.fcgi?db={db}&id={uid}&retmode=json&{api_key_flag}',
                                                     retries=retries,
                                                     params=params)
-                    accession_result = summary_data['result'].get(uid, {}).get('accessionversion')
-                    title_result = summary_data['result'].get(uid, {}).get('title')
+                    if db == 'nucleotide':
+                        accession_tag = 'accessionversion'
+                        strain_tag = 'title'
+                        accession_re = ACCESSION_PATTERN_NUCLEOTIDE
+                    elif db == 'biosample':
+                        accession_tag = 'accession'
+                        strain_tag = 'infraspecies'
+                        accession_re = ACCESSION_PATTERN_BIOSAMPLE
+                    else:
+                        raise ValueError("`db` must be one of ['nucleotide', 'biosample']")
 
-                    if accession_result and re.match(ACCESSION_PATTERN, accession_result) and title_term in title_result:
+                    accession_result = summary_data['result'].get(uid, {}).get(accession_tag)
+                    title_result = summary_data['result'].get(uid, {}).get(strain_tag)
+
+                    if accession_result and re.match(accession_re, accession_result) and title_term in title_result:
                         return term, accession_result
 
                 return term, None
