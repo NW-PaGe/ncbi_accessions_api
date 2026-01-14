@@ -100,7 +100,7 @@ async def fetch_nucleotide_accession(
     """
     results = await fetch_all_db(
         # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
-        terms=[term.strip() for term in terms.split(',')],
+        terms={term.strip() for term in terms.split(',')},
         params=params,
         db='nucleotide'
     )
@@ -142,7 +142,7 @@ async def fetch_biosample_accession(
     """
     results = await fetch_all_db(
         # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
-        terms=[term.strip() for term in terms.split(',')],
+        terms={term.strip() for term in terms.split(',')},
         params=params,
         db='biosample'
     )
@@ -203,7 +203,7 @@ async def fetch_sra_accession(
     """
     results = await fetch_all_db(
         # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
-        terms=[term.strip() for term in terms.split(',')],
+        terms={term.strip() for term in terms.split(',')},
         params=params,
         db='sra',
         acc=acc
@@ -357,7 +357,7 @@ async def fetch_all_db(terms, params, db, acc=None):
     """ Fetches database accession numbers for a list of terms in parallel using asynchronous workers.
 
     Parameters:
-        terms (list | str): A search term or comma-separated search terms.
+        terms (set | str): A search term or comma-separated search terms.
         params (FetchAccessionParams): API query parameters.
         db (str): The NCBI database to search within.
         acc (list[SRAAccessionType] | None): If querying SRA, specifies the types of accessions to return.
@@ -366,7 +366,7 @@ async def fetch_all_db(terms, params, db, acc=None):
         dict: A dictionary where each key is a term, and each value is its corresponding database accession result.
     """
     if isinstance(terms, str):
-        terms = [terms]
+        terms = {terms}
 
     # RPS selection
     ncbi_cap = 10 if params.api_key else 3  # Max rps from NCBI docs
