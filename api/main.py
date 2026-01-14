@@ -2,8 +2,8 @@ import asyncio
 import aiohttp
 import re
 from fastapi import FastAPI, Query, Depends
-from pydantic import BaseModel, Field, RootModel, field_validator
-from typing import Optional
+from pydantic import BaseModel, Field, RootModel
+from typing import Optional, Annotated
 import xml.etree.ElementTree as ET
 from enum import Enum
 
@@ -45,7 +45,7 @@ class FetchAccessionParams(BaseModel):
     num_workers: int = Field(NUM_WORKERS, ge=1, le=10, description='Number of concurrent workers')
     max_retries: int = Field(MAX_RETRIES, ge=0, le=10, description='Maximum number of retries per term')
     request_delay: float = Field(REQUEST_DELAY, ge=0.001, le=60, description='Delay between requests in seconds')
-    accession_types: Optional[str] = Field(None, description='SRA accession types to return')
+    accession_types: list[str] = []
 
 class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
     model_config = {
@@ -59,12 +59,13 @@ class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
 
 @app.get('/fetch-nucleotide-accession/', response_model=FetchNucleotideAccessionResponse)
 async def fetch_nucleotide_accession(
-        terms: str = Query(...,
+        terms: Annotated[str, Query(...,
                            description='Search term(s) to retrieve accession numbers. Separate multiple terms with commas.',
                            example='WA-PHL-007327,USA/WA-PHL-007328/2021',
                            examples=['WA-PHL-007327', 'USA/WA-PHL-007328/2021']
-                           ),
-        params: FetchAccessionParams = Depends()
+                           )
+        ],
+        params: Annotated[FetchAccessionParams, Query()]
 ):
     f""" Fetches GenBank accession numbers for the provided search terms.
 
