@@ -40,17 +40,6 @@ class FetchAccessionParams(BaseModel):
     num_workers: int = Field(NUM_WORKERS, ge=1, le=10, description='Number of concurrent workers')
     max_retries: int = Field(MAX_RETRIES, ge=0, le=10, description='Maximum number of retries per term')
     request_delay: float = Field(REQUEST_DELAY, ge=0.001, le=60, description='Delay between requests in seconds')
-    accession_types: list[str] = Field(
-        default=ALLOWED_SRA_ACCESSIONS,
-        description=f'SRA accession types to return ({", ".join(ALLOWED_SRA_ACCESSIONS)})'
-    )
-    @field_validator('accession_types')
-    def validate_accession_types(cls, accs):
-        invalid = [acc for acc in accs if acc.lower() not in ALLOWED_SRA_ACCESSIONS]
-        if invalid:
-            raise ValueError(f'Invalid SRA accession types: {invalid}')
-        return [acc.lower() for acc in accs]
-
 
 class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
     model_config = {
@@ -160,6 +149,14 @@ class FetchSRAAccessionResponse(RootModel[dict[str, dict[str, Optional[str]]]]):
         }
     }
 
+from enum import Enum
+class SRAAccessionType(str, Enum):
+    srr = "srr"
+    sra = "sra"
+    srp = "srp"
+    srs = "srs"
+    srx = "srx"
+
 @app.get('/fetch-sra-accession/', response_model=FetchSRAAccessionResponse)
 async def fetch_sra_accession(
         terms: str = Query(...,
@@ -167,9 +164,15 @@ async def fetch_sra_accession(
                            example='WAPHL-188937,WNV/USA/WAPHL-520992/2025',
                            examples=['WAPHL-188937', 'WNV/USA/WAPHL-520992/2025']
                            ),
+        accession_types: list[SRAAccessionType] = Query(
+                default=list(SRAAccessionType),
+                description="SRA accession types to return",
+            example=['sra', 'srr'],
+            examples=[['sra', 'srr'], ['srp']]
+            ),
         params: FetchAccessionParams = Depends()
 ):
-    f""" Fetches BioSample accession numbers for the provided search terms.
+    f""" Fetches SRA accession numbers for the provided search terms.
 
     ## Parameters
     - **terms** (`str`, *required*): Search term to retrieve accession numbers.
@@ -185,6 +188,9 @@ async def fetch_sra_accession(
     - The keys are the search terms.
     - The values are their corresponding accession numbers.
     """
+
+    params.accession_types = [a.value for a in accession_types]
+
     results = await fetch_all_db(
         # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
         terms=[term.strip() for term in terms.split(',')],
