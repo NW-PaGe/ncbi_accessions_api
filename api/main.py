@@ -18,6 +18,14 @@ NUM_WORKERS = 5
 ACCESSION_PATTERN_NUCLEOTIDE = r'^[A-Za-z]\d{5}\.|^[A-Za-z]{2}\d{6}\.|^[A-Za-z]{2}\d{8}\.'
 ACCESSION_PATTERN_BIOSAMPLE = r'SAMN\d{3,}'
 
+class SRAAccessionType(str, Enum):
+    """Types of accessions that could be pulled in the SRA Accession GET"""
+    srr = "srr"
+    sra = "sra"
+    srp = "srp"
+    srs = "srs"
+    srx = "srx"
+
 app = FastAPI()
 
 class FetchAccessionParams(BaseModel):
@@ -37,6 +45,7 @@ class FetchAccessionParams(BaseModel):
     num_workers: int = Field(NUM_WORKERS, ge=1, le=10, description='Number of concurrent workers')
     max_retries: int = Field(MAX_RETRIES, ge=0, le=10, description='Maximum number of retries per term')
     request_delay: float = Field(REQUEST_DELAY, ge=0.001, le=60, description='Delay between requests in seconds')
+    accession_types: int = Field(None, description='SRA accession types to return')
 
 class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
     model_config = {
@@ -146,13 +155,6 @@ class FetchSRAAccessionResponse(RootModel[dict[str, dict[str, Optional[str]]]]):
         }
     }
 
-class SRAAccessionType(str, Enum):
-    srr = "srr"
-    sra = "sra"
-    srp = "srp"
-    srs = "srs"
-    srx = "srx"
-
 @app.get('/fetch-sra-accession/', response_model=FetchSRAAccessionResponse)
 async def fetch_sra_accession(
         terms: str = Query(...,
@@ -172,13 +174,13 @@ async def fetch_sra_accession(
 
     ## Parameters
     - **terms** (`str`, *required*): Search term to retrieve accession numbers.
+    - **accession_types** (`list[str]`, *required*, default=`{', '.join(a.value for a in SRAAccessionType)}`): SRA accession types to return.
     - **api_key** (`str`, *optional*): User's NCBI API key.
     - **timeout** (`int`, *required*, default=`{REQUEST_TIMEOUT}`): Timeout for requests in seconds.
     - **num_workers** (`int`, *required*, default=`{NUM_WORKERS}`): Number of concurrent workers.
     - **max_retries** (`int`, *required*, default=`{MAX_RETRIES}`): Maximum number of retries per term.
     - **request_delay** (`float`, *required*, default=`{REQUEST_DELAY}`): Delay between requests in seconds.
-    - **accession_types** (`list[str]`, *required*, default=`{', '.join(a.value for a in SRAAccessionType)}`): SRA accession types to return.
-
+    
     ## Returns
     A `dict` containing the results, where:
     - The keys are the search terms.
