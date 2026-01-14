@@ -45,7 +45,6 @@ class FetchAccessionParams(BaseModel):
     num_workers: int = Field(NUM_WORKERS, ge=1, le=10, description='Number of concurrent workers')
     max_retries: int = Field(MAX_RETRIES, ge=0, le=10, description='Maximum number of retries per term')
     request_delay: float = Field(REQUEST_DELAY, ge=0.001, le=60, description='Delay between requests in seconds')
-    accession_types: Optional[list[str]]
 
 class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
     model_config = {
@@ -162,7 +161,7 @@ async def fetch_sra_accession(
                            example='WAPHL-188937,WNV/USA/WAPHL-520992/2025',
                            examples=['WAPHL-188937', 'WNV/USA/WAPHL-520992/2025']
                            ),
-        accession_types: list[SRAAccessionType] = Query(
+        acc_types: list[SRAAccessionType] = Query(
                 default=list(SRAAccessionType),
                 description="SRA accession types to return",
             example=['sra', 'srr'],
@@ -187,13 +186,14 @@ async def fetch_sra_accession(
     - The values are their corresponding accession numbers.
     """
 
-    params.accession_types = [a.value for a in accession_types]
+    # params.accession_types = [a.value for a in accession_types]
 
     results = await fetch_all_db(
         # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
         terms=[term.strip() for term in terms.split(',')],
         params=params,
-        db='sra'
+        db='sra',
+        acc_types=acc_types
     )
     return results
 
@@ -202,7 +202,8 @@ async def fetch_db(term: str,
                    params: FetchAccessionParams,
                    db: str,
                    session: aiohttp.ClientSession,
-                   semaphore: asyncio.Semaphore | None = None):
+                   semaphore: asyncio.Semaphore | None = None,
+                   acc_types: list[SRAAccessionType] | None = None):
     """ Fetches database accession information for a given term using the NCBI Entrez API.
 
     Parameters:
@@ -211,6 +212,7 @@ async def fetch_db(term: str,
         db (str): The NCBI database to search within. Must equal one of the databases listed by https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo (e.g., nucleotide, biosample, sra)
         session (aiohttp.ClientSession): The active HTTP session to send requests.
         semaphore (asyncio.Semaphore | None): A semaphore to limit concurrent requests (default is None).
+        acc_types (list[SRAAccessionType] | None): If querying SRA, specifies the types of accessions to return.
 
     Returns:
         Tuple[str, str | None]: A tuple containing the search term and the accession result. If no result is found, the accession result is None.
@@ -238,7 +240,7 @@ async def fetch_db(term: str,
                 if len(id_list) > 10:
                     # Exit if sra is being searched (there is no tried and true way to search for strain name in results)
                     if db == 'sra':
-                        return term, {acc: None for acc in params.accession_types}
+                        return term, {acc: None for acc in acc_types}
                     # Otherwise, limit id search to first 10 ids
                     id_list = id_list[:10]
 
@@ -252,14 +254,14 @@ async def fetch_db(term: str,
 
                     if db == 'sra':
                         accession_result = {acc: None for acc in ["srr", "sra", "srp", "srs", "srx"]}
-                        if 'srr' in params.accession_types:
+                        if 'srr' in acc_types:
                             runs = result.get('runs')
                             if runs:
                                 try:
                                     accession_result['srr'] = ET.fromstring(runs.strip()).attrib.get('acc')
                                 except ET.ParseError:
                                     pass
-                        if any(x in params.accession_types for x in ['sra', 'srp', 'srs', 'srx']):
+                        if any(x in acc_types for x in ['sra', 'srp', 'srs', 'srx']):
                             exp = result.get('expxml')
                             if exp:
                                 try:
@@ -271,13 +273,13 @@ async def fetch_db(term: str,
                                         'srx': 'Experiment',
                                     }
                                     for acc, tag in tag_map.items():
-                                        if acc in params.accession_types:
+                                        if acc in acc_types:
                                             elem = exp_xml.find(tag)
                                             if elem is not None:
                                                 accession_result[acc] = elem.attrib.get('acc')
                                 except ET.ParseError:
                                     pass
-                        return term, {acc: accession_result[acc] for acc in params.accession_types}
+                        return term, {acc: accession_result[acc] for acc in acc_types}
 
                     elif db in ['nucleotide', 'biosample']:
                         if db == 'nucleotide':
@@ -359,13 +361,14 @@ async def handle_retry_error(error, retries):
     return wait_time
 
 
-async def fetch_all_db(terms, params, db):
+async def fetch_all_db(terms, params, db, acc_types=None):
     """ Fetches database accession numbers for a list of terms in parallel using asynchronous workers.
 
     Parameters:
         terms (list | str): A search term or comma-separated search terms.
         params (FetchAccessionParams): API query parameters.
         db (str): The NCBI database to search within.
+        acc_types (list[SRAAccessionType] | None): If querying SRA, specifies the types of accessions to return.
 
     Returns:
         dict: A dictionary where each key is a term, and each value is its corresponding database accession result.
@@ -390,7 +393,8 @@ async def fetch_all_db(terms, params, db):
                        results=results,
                        semaphore=semaphore,
                        params=params,
-                       db=db)
+                       db=db,
+                       acc_types=acc_types)
             ) for _ in range(params.num_workers)
         ]
 
@@ -404,7 +408,7 @@ async def fetch_all_db(terms, params, db):
     return results
 
 
-async def worker(queue, session, results, semaphore, params, db):
+async def worker(queue, session, results, semaphore, params, db, acc_types=None):
     """ Worker function to process tasks from the queue asynchronously.
 
     Parameters:
@@ -414,6 +418,7 @@ async def worker(queue, session, results, semaphore, params, db):
         semaphore (asyncio.Semaphore): A semaphore to limit concurrent requests.
         params (FetchAccessionParams): API query parameters.
         db (str): The NCBI database to search within.
+        acc_types (list[SRAAccessionType] | None): If querying SRA, specifies the types of accessions to return.
 
     Returns:
         None: The results are stored in the `results` dictionary.
@@ -430,7 +435,8 @@ async def worker(queue, session, results, semaphore, params, db):
                 params=params,
                 db=db,
                 session=session,
-                semaphore=semaphore
+                semaphore=semaphore,
+                acc_types=acc_types
             )
             results[term] = result
         except Exception as e:
