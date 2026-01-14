@@ -257,14 +257,14 @@ async def fetch_db(term: str,
 
                     if db == 'sra':
                         accession_result = {a: None for a in ["srr", "sra", "srp", "srs", "srx"]}
-                        if 'srr' in acc:
+                        if SRAAccessionType.srr in acc:
                             runs = result.get('runs')
                             if runs:
                                 try:
                                     accession_result['srr'] = ET.fromstring(runs.strip()).attrib.get('acc')
                                 except ET.ParseError:
                                     pass
-                        if any(x in acc for x in ['sra', 'srp', 'srs', 'srx']):
+                        if any(x in acc for x in [SRAAccessionType.sra, SRAAccessionType.srp, SRAAccessionType.srs, SRAAccessionType.srx]):
                             exp = result.get('expxml')
                             if exp:
                                 try:
