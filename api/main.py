@@ -3,7 +3,7 @@ import aiohttp
 import re
 from fastapi import FastAPI, Query, Depends
 from pydantic import BaseModel, Field, RootModel
-from typing import Optional, Annotated
+from typing import Optional
 import xml.etree.ElementTree as ET
 from enum import Enum
 
@@ -59,13 +59,12 @@ class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
 
 @app.get('/fetch-nucleotide-accession/', response_model=FetchNucleotideAccessionResponse)
 async def fetch_nucleotide_accession(
-        terms: Annotated[str, Query(...,
+        terms: str = Query(...,
                            description='Search term(s) to retrieve accession numbers. Separate multiple terms with commas.',
                            example='WA-PHL-007327,USA/WA-PHL-007328/2021',
                            examples=['WA-PHL-007327', 'USA/WA-PHL-007328/2021']
-                           )
-        ],
-        params: Annotated[FetchAccessionParams, Query()]
+                           ),
+        params: FetchAccessionParams = Depends()
 ):
     f""" Fetches GenBank accession numbers for the provided search terms.
 
