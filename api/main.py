@@ -45,7 +45,7 @@ class FetchAccessionParams(BaseModel):
     num_workers: int = Field(NUM_WORKERS, ge=1, le=10, description='Number of concurrent workers')
     max_retries: int = Field(MAX_RETRIES, ge=0, le=10, description='Maximum number of retries per term')
     request_delay: float = Field(REQUEST_DELAY, ge=0.001, le=60, description='Delay between requests in seconds')
-    accession_types: int = Field(None, description='SRA accession types to return')
+    accession_types: Optional[str] = Field(None, description='SRA accession types to return')
 
 class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
     model_config = {
