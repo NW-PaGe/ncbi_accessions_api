@@ -5,6 +5,7 @@ from fastapi import FastAPI, Query, Depends
 from pydantic import BaseModel, Field, RootModel, field_validator
 from typing import Optional
 import xml.etree.ElementTree as ET
+from enum import Enum
 
 # Constants for timeout, retry settings
 MAX_RETRIES = 5
@@ -16,9 +17,6 @@ NUM_WORKERS = 5
 # A12345 or AB123456 or AB12345678
 ACCESSION_PATTERN_NUCLEOTIDE = r'^[A-Za-z]\d{5}\.|^[A-Za-z]{2}\d{6}\.|^[A-Za-z]{2}\d{8}\.'
 ACCESSION_PATTERN_BIOSAMPLE = r'SAMN\d{3,}'
-
-# SRA accession types that are available to extract
-ALLOWED_SRA_ACCESSIONS = ['srr', 'sra', 'srp', 'srs', 'srx']
 
 app = FastAPI()
 
@@ -33,7 +31,6 @@ class FetchAccessionParams(BaseModel):
         num_workers (int, default={NUM_WORKERS}): Number of concurrent workers.
         max_retries (int, default={MAX_RETRIES}): Maximum number of retries per term.
         request_delay (float, default={REQUEST_DELAY}): Delay between requests in seconds.
-        accession_types (list[str], default={ALLOWED_SRA_ACCESSIONS}): SRA accession types to return.
     """
     api_key: Optional[str] = Field(None, description="User's NCBI API key")
     timeout: int = Field(REQUEST_TIMEOUT, ge=0, le=500, description='Timeout for requests in seconds')
@@ -149,7 +146,6 @@ class FetchSRAAccessionResponse(RootModel[dict[str, dict[str, Optional[str]]]]):
         }
     }
 
-from enum import Enum
 class SRAAccessionType(str, Enum):
     srr = "srr"
     sra = "sra"
