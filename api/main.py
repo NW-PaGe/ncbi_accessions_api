@@ -177,7 +177,7 @@ async def fetch_sra_accession(
     - **num_workers** (`int`, *required*, default=`{NUM_WORKERS}`): Number of concurrent workers.
     - **max_retries** (`int`, *required*, default=`{MAX_RETRIES}`): Maximum number of retries per term.
     - **request_delay** (`float`, *required*, default=`{REQUEST_DELAY}`): Delay between requests in seconds.
-    - **accession_types** (`list[str]`, *required*, default=`{ALLOWED_SRA_ACCESSIONS}`): SRA accession types to return.
+    - **accession_types** (`list[str]`, *required*, default=`{', '.join(a.value for a in SRAAccessionType)}`): SRA accession types to return.
 
     ## Returns
     A `dict` containing the results, where:
