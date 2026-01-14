@@ -158,8 +158,8 @@ class FetchSRAAccessionResponse(RootModel[dict[str, dict[str, Optional[str]]]]):
 async def fetch_sra_accession(
         terms: str = Query(...,
                            description='Search term(s) to retrieve accession numbers. Separate multiple terms with commas.',
-                           example='WAPHL-188937,WNV/USA/WAPHL-520992/2025',
-                           examples=['WAPHL-188937', 'WNV/USA/WAPHL-520992/2025']
+                           example='WA-PHL-033153,USA/WA-CDC-LC1021650/2023',
+                           examples=['WA-PHL-033153', 'USA/WA-CDC-LC1021650/2023']
                            ),
         acc_types: list[SRAAccessionType] = Query(
                 default=list(SRAAccessionType),
@@ -173,7 +173,7 @@ async def fetch_sra_accession(
 
     ## Parameters
     - **terms** (`str`, *required*): Search term to retrieve accession numbers.
-    - **accession_types** (`list[str]`, *required*, default=`{', '.join(a.value for a in SRAAccessionType)}`): SRA accession types to return.
+    - **acc_types** (`SRAAccessionType`, *required*, default=`{', '.join(acc.value for acc in SRAAccessionType)}`): SRA accession types to return.
     - **api_key** (`str`, *optional*): User's NCBI API key.
     - **timeout** (`int`, *required*, default=`{REQUEST_TIMEOUT}`): Timeout for requests in seconds.
     - **num_workers** (`int`, *required*, default=`{NUM_WORKERS}`): Number of concurrent workers.
@@ -185,9 +185,6 @@ async def fetch_sra_accession(
     - The keys are the search terms.
     - The values are their corresponding accession numbers.
     """
-
-    # params.accession_types = [a.value for a in accession_types]
-
     results = await fetch_all_db(
         # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
         terms=[term.strip() for term in terms.split(',')],
@@ -225,6 +222,12 @@ async def fetch_db(term: str,
     title_term = term if '/' in term else f'/{term}/'
     title_term = re.sub(r'/+', '/', title_term)  # dedup slashes
 
+    # Set default return values
+    if db == 'sra':
+        ret_none = {acc: None for acc in acc_types}
+    else:
+        ret_none = None
+
     async with semaphore:
         while retries < params.max_retries:
             try:
@@ -236,11 +239,11 @@ async def fetch_db(term: str,
 
                 id_list = data.get('esearchresult', {}).get('idlist', [])
                 if not id_list:
-                    return term, None
+                    return term, ret_none
                 if len(id_list) > 10:
                     # Exit if sra is being searched (there is no tried and true way to search for strain name in results)
                     if db == 'sra':
-                        return term, {acc: None for acc in acc_types}
+                        return term, ret_none
                     # Otherwise, limit id search to first 10 ids
                     id_list = id_list[:10]
 
@@ -300,7 +303,7 @@ async def fetch_db(term: str,
                     else:
                         raise ValueError("`db` must be one of 'biosample', 'nucleotide', or 'sra'")
 
-                return term, None
+                return term, ret_none
 
             except (asyncio.TimeoutError, aiohttp.ClientError) as e:
                 wait_time = await handle_retry_error(e, retries)
@@ -308,7 +311,7 @@ async def fetch_db(term: str,
                 await asyncio.sleep(wait_time)
             except Exception as e:
                 print(f'!!! Unexpected error fetching {term}: {e}')
-                return term, None
+                return term, ret_none
 
     print(f'!!! Failed after {params.max_retries} retries: {term}')
     return term, None
