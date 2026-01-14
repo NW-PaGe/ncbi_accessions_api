@@ -2,9 +2,9 @@ import asyncio
 import aiohttp
 import re
 from fastapi import FastAPI, Query, Depends
-from pydantic import BaseModel, Field, RootModel
+from pydantic import BaseModel, Field, RootModel, field_validator
 from typing import Optional
-
+import xml.etree.ElementTree as ET
 
 # Constants for timeout, retry settings
 MAX_RETRIES = 5
@@ -16,6 +16,9 @@ NUM_WORKERS = 5
 # A12345 or AB123456 or AB12345678
 ACCESSION_PATTERN_NUCLEOTIDE = r'^[A-Za-z]\d{5}\.|^[A-Za-z]{2}\d{6}\.|^[A-Za-z]{2}\d{8}\.'
 ACCESSION_PATTERN_BIOSAMPLE = r'SAMN\d{3,}'
+
+# SRA accession types that are available to extract
+ALLOWED_SRA_ACCESSIONS = ['srr', 'sra', 'srp', 'srs', 'srx']
 
 app = FastAPI()
 
@@ -29,36 +32,42 @@ class FetchAccessionParams(BaseModel):
         timeout (int, default={REQUEST_TIMEOUT}): Timeout for requests in seconds.
         num_workers (int, default={NUM_WORKERS}): Number of concurrent workers.
         max_retries (int, default={MAX_RETRIES}): Maximum number of retries per term.
-        request_delay (float, default={REQUEST_DELAY}): Delay between requests in seconds
+        request_delay (float, default={REQUEST_DELAY}): Delay between requests in seconds.
+        accession_types (list[str], default={ALLOWED_SRA_ACCESSIONS}): SRA accession types to return.
     """
-    # terms: str = Field(
-    #     ...,
-    #     description="Search term(s) to retrieve accession numbers. Separate multiple terms with commas.",
-    #     examples=["WA-PHL-007327", "USA/WA-PHL-007328/2021"]
-    # )
-    api_key: Optional[str] = Field(None, description="User's NCBI API key", nullable=True)
-    timeout: int = Field(REQUEST_TIMEOUT, ge=0, le=500, description="Timeout for requests in seconds")
-    num_workers: int = Field(NUM_WORKERS, ge=1, le=10, description="Number of concurrent workers")
-    max_retries: int = Field(MAX_RETRIES, ge=0, le=10, description="Maximum number of retries per term")
-    request_delay: float = Field(REQUEST_DELAY, ge=0.001, le=60, description="Delay between requests in seconds")
+    api_key: Optional[str] = Field(None, description="User's NCBI API key")
+    timeout: int = Field(REQUEST_TIMEOUT, ge=0, le=500, description='Timeout for requests in seconds')
+    num_workers: int = Field(NUM_WORKERS, ge=1, le=10, description='Number of concurrent workers')
+    max_retries: int = Field(MAX_RETRIES, ge=0, le=10, description='Maximum number of retries per term')
+    request_delay: float = Field(REQUEST_DELAY, ge=0.001, le=60, description='Delay between requests in seconds')
+    accession_types: list[str] = Field(
+        default=ALLOWED_SRA_ACCESSIONS,
+        description=f'SRA accession types to return ({", ".join(ALLOWED_SRA_ACCESSIONS)})'
+    )
+    @field_validator('accession_types')
+    def validate_accession_types(cls, accs):
+        invalid = [acc for acc in accs if acc.lower() not in ALLOWED_SRA_ACCESSIONS]
+        if invalid:
+            raise ValueError(f'Invalid SRA accession types: {invalid}')
+        return [acc.lower() for acc in accs]
 
 
 class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
     model_config = {
-        "json_schema_extra": {
-            "example": {
-                "WA-PHL-007327": "PQ880188.1",
-                "USA/WA-PHL-007328/2021": "PQ880189.1"
+        'json_schema_extra': {
+            'example': {
+                'WA-PHL-007327': 'PQ880188.1',
+                'USA/WA-PHL-007328/2021': 'PQ880189.1'
             }
         }
     }
 
-@app.get("/fetch-nucleotide-accession/", response_model=FetchNucleotideAccessionResponse)
+@app.get('/fetch-nucleotide-accession/', response_model=FetchNucleotideAccessionResponse)
 async def fetch_nucleotide_accession(
         terms: str = Query(...,
-                           description="Search term(s) to retrieve accession numbers. Separate multiple terms with commas.",
-                           example="WA-PHL-007327,USA/WA-PHL-007328/2021",
-                           examples=["WA-PHL-007327", "USA/WA-PHL-007328/2021"]
+                           description='Search term(s) to retrieve accession numbers. Separate multiple terms with commas.',
+                           example='WA-PHL-007327,USA/WA-PHL-007328/2021',
+                           examples=['WA-PHL-007327', 'USA/WA-PHL-007328/2021']
                            ),
         params: FetchAccessionParams = Depends()
 ):
@@ -88,20 +97,20 @@ async def fetch_nucleotide_accession(
 
 class FetchBioSampleAccessionResponse(RootModel[dict[str, Optional[str]]]):
     model_config = {
-        "json_schema_extra": {
-            "example": {
-                "WAPHL-188937": "SAMN51251905",
-                "WNV/USA/WAPHL-520992/2025": "SAMN51590889"
+        'json_schema_extra': {
+            'example': {
+                'WAPHL-188937': 'SAMN51251905',
+                'WNV/USA/WAPHL-520992/2025': 'SAMN51590889'
             }
         }
     }
 
-@app.get("/fetch-biosample-accession/", response_model=FetchBioSampleAccessionResponse)
+@app.get('/fetch-biosample-accession/', response_model=FetchBioSampleAccessionResponse)
 async def fetch_biosample_accession(
         terms: str = Query(...,
-                           description="Search term(s) to retrieve accession numbers. Separate multiple terms with commas.",
-                           example="WAPHL-188937,WNV/USA/WAPHL-520992/2025",
-                           examples=["WAPHL-188937", "WNV/USA/WAPHL-520992/2025"]
+                           description='Search term(s) to retrieve accession numbers. Separate multiple terms with commas.',
+                           example='WAPHL-188937,WNV/USA/WAPHL-520992/2025',
+                           examples=['WAPHL-188937', 'WNV/USA/WAPHL-520992/2025']
                            ),
         params: FetchAccessionParams = Depends()
 ):
@@ -125,6 +134,62 @@ async def fetch_biosample_accession(
         terms=[term.strip() for term in terms.split(',')],
         params=params,
         db='biosample'
+    )
+    return results
+
+
+class FetchSRAAccessionResponse(RootModel[dict[str, dict[str, Optional[str]]]]):
+    model_config = {
+        'json_schema_extra': {
+            'example': {
+                'WA-PHL-033153': {
+                    'srr': 'SRR31232922',
+                    'sra': 'SRA2005952',
+                    'srp': 'SRP446846',
+                    'srs': 'SRS23111612',
+                    'srx': 'SRX26612931'
+                },
+                'USA/WA-CDC-LC1021650/2023': {
+                    'srr': 'SRR23850971',
+                    'sra': 'SRA1603506',
+                    'srp': 'SRP325386',
+                    'srs': 'SRS17034203',
+                    'srx': 'SRX19663757'
+                }
+            }
+        }
+    }
+
+@app.get('/fetch-sra-accession/', response_model=FetchSRAAccessionResponse)
+async def fetch_sra_accession(
+        terms: str = Query(...,
+                           description='Search term(s) to retrieve accession numbers. Separate multiple terms with commas.',
+                           example='WAPHL-188937,WNV/USA/WAPHL-520992/2025',
+                           examples=['WAPHL-188937', 'WNV/USA/WAPHL-520992/2025']
+                           ),
+        params: FetchAccessionParams = Depends()
+):
+    f""" Fetches BioSample accession numbers for the provided search terms.
+
+    ## Parameters
+    - **terms** (`str`, *required*): Search term to retrieve accession numbers.
+    - **api_key** (`str`, *optional*): User's NCBI API key.
+    - **timeout** (`int`, *required*, default=`{REQUEST_TIMEOUT}`): Timeout for requests in seconds.
+    - **num_workers** (`int`, *required*, default=`{NUM_WORKERS}`): Number of concurrent workers.
+    - **max_retries** (`int`, *required*, default=`{MAX_RETRIES}`): Maximum number of retries per term.
+    - **request_delay** (`float`, *required*, default=`{REQUEST_DELAY}`): Delay between requests in seconds.
+    - **accession_types** (`list[str]`, *required*, default=`{ALLOWED_SRA_ACCESSIONS}`): SRA accession types to return.
+
+    ## Returns
+    A `dict` containing the results, where:
+    - The keys are the search terms.
+    - The values are their corresponding accession numbers.
+    """
+    results = await fetch_all_db(
+        # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
+        terms=[term.strip() for term in terms.split(',')],
+        params=params,
+        db='sra'
     )
     return results
 
@@ -166,7 +231,11 @@ async def fetch_db(term: str,
                 id_list = data.get('esearchresult', {}).get('idlist', [])
                 if not id_list:
                     return term, None
-                if len(id_list) > 10:  # Limit id search to first 10 ids
+                if len(id_list) > 10:
+                    # Exit if sra is being searched (there is no tried and true way to search for strain name in results)
+                    if db == 'sra':
+                        return term, {acc: None for acc in params.accession_types}
+                    # Otherwise, limit id search to first 10 ids
                     id_list = id_list[:10]
 
                 for uid in id_list:
@@ -174,23 +243,56 @@ async def fetch_db(term: str,
                                                     url=f'{eutils}/esummary.fcgi?db={db}&id={uid}&retmode=json&{api_key_flag}',
                                                     retries=retries,
                                                     params=params)
-                    if db == 'nucleotide':
-                        accession_tag = 'accessionversion'
-                        strain_tag = 'title'
-                        accession_re = ACCESSION_PATTERN_NUCLEOTIDE
-                    elif db == 'biosample':
-                        accession_tag = 'accession'
-                        strain_tag = 'infraspecies'
-                        accession_re = ACCESSION_PATTERN_BIOSAMPLE
-                    else:
-                        raise ValueError("`db` must be one of ['nucleotide', 'biosample']")
 
-                    accession_result = summary_data['result'].get(uid, {}).get(accession_tag)
-                    title_result = summary_data['result'].get(uid, {}).get(strain_tag)
-                    title_result = re.sub(r'/+', '/', title_result)  # dedup slashes
-                    
-                    if accession_result and re.match(accession_re, accession_result) and title_term in title_result:
-                        return term, accession_result
+                    result = summary_data['result'].get(uid, {})
+
+                    if db == 'sra':
+                        accession_result = {acc: None for acc in ["srr", "sra", "srp", "srs", "srx"]}
+                        if 'srr' in params.accession_types:
+                            runs = result.get('runs')
+                            if runs:
+                                try:
+                                    accession_result['srr'] = ET.fromstring(runs.strip()).attrib.get('acc')
+                                except ET.ParseError:
+                                    pass
+                        if any(x in params.accession_types for x in ['sra', 'srp', 'srs', 'srx']):
+                            exp = result.get('expxml')
+                            if exp:
+                                try:
+                                    exp_xml = ET.fromstring(f'<root>{exp.strip()}</root>')
+                                    tag_map = {
+                                        'sra': 'Submitter',
+                                        'srp': 'Study',
+                                        'srs': 'Sample',
+                                        'srx': 'Experiment',
+                                    }
+                                    for acc, tag in tag_map.items():
+                                        if acc in params.accession_types:
+                                            elem = exp_xml.find(tag)
+                                            if elem is not None:
+                                                accession_result[acc] = elem.attrib.get('acc')
+                                except ET.ParseError:
+                                    pass
+                        return term, {acc: accession_result[acc] for acc in params.accession_types}
+
+                    elif db in ['nucleotide', 'biosample']:
+                        if db == 'nucleotide':
+                            accession_tag = 'accessionversion'
+                            strain_tag = 'title'
+                            accession_re = ACCESSION_PATTERN_NUCLEOTIDE
+                        elif db == 'biosample':
+                            accession_tag = 'accession'
+                            strain_tag = 'infraspecies'
+                            accession_re = ACCESSION_PATTERN_BIOSAMPLE
+
+                        accession_result = result.get(accession_tag)
+                        title_result = summary_data['result'].get(uid, {}).get(strain_tag, '')
+                        title_result = re.sub(r'/+', '/', title_result)  # dedup slashes
+                        if accession_result and re.match(accession_re, accession_result) and title_term in title_result:
+                            return term, accession_result
+
+                    else:
+                        raise ValueError("`db` must be one of 'biosample', 'nucleotide', or 'sra'")
 
                 return term, None
 
