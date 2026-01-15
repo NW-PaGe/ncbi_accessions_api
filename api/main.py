@@ -233,7 +233,7 @@ async def fetch_db(term: str,
         Tuple[str, str | None]: A tuple containing the search term and the accession result. If no result is found, the accession result is None.
     """
     eutils = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils'
-    #retries = 0
+
     api_key_flag = f'api_key={params.api_key}' if params.api_key else ''
 
     # Set title term to match on
