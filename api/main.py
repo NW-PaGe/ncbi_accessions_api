@@ -179,7 +179,7 @@ async def fetch_sra_accession(
                            examples=['WA-PHL-033153', 'USA/WA-CDC-LC1021650/2023']
                            ),
         acc: list[SRAAccessionType] = Query(
-                default=list(SRAAccessionType),
+                default=SRAAccessionType,
                 description="SRA accession types to return",
             example=['sra', 'srr'],
             examples=[['sra', 'srr'], ['srp']]
