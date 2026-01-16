@@ -47,6 +47,14 @@ class SRAAccessionType(str, Enum):
     srs = "srs"
     srx = "srx"
 
+class SRAAccessionType(str, Enum):
+    """Types of accessions that could be pulled in the SRA Accession GET"""
+    srr = "srr"
+    sra = "sra"
+    srp = "srp"
+    srs = "srs"
+    srx = "srx"
+
 app = FastAPI()
 
 class FetchAccessionParams(BaseModel):
@@ -242,6 +250,12 @@ async def fetch_db(term: str,
 
     # Set default return values
     ret_none = {a: None for a in acc} if db == 'sra' else None
+
+    # Set default return values
+    if db == 'sra':
+        ret_none = {a: None for a in acc}
+    else:
+        ret_none = None
 
     async with semaphore:
         data = await fetch_data(session=session,
