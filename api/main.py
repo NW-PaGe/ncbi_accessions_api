@@ -315,8 +315,8 @@ async def fetch_db(term: str,
             accession = result.get(accession_tag)  # extract accession
             title = re.sub(SLASH_PATTERN, '/', result.get(strain_tag, ''))  # extract title & dedup slashes
 
-            if accession and accession_re.match(accession):
-                if not params.validate or title_term.lower() in title.lower():
+            if accession:
+                if not params.validate or (accession_re.match(accession) and title_term.lower() in title.lower()):
                     return term, accession
 
         return term, ret_none
