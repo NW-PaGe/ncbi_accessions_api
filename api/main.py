@@ -8,10 +8,12 @@ from typing import Optional
 import xml.etree.ElementTree as ET
 from enum import Enum
 
-# Constants for timeout, retry settings
+# Defaults for settings
 MAX_RETRIES = 5
 REQUEST_TIMEOUT = 15
 NUM_WORKERS = 5
+VALIDATE = True
+
 
 # Regex patters:
 # A12345 or AB123456 or AB12345678:
@@ -39,24 +41,6 @@ class RateLimiter:
                 await asyncio.sleep(wait)
             self._last_call = time.monotonic()
 
-class SRAAccessionType(str, Enum):
-    """Types of accessions that could be pulled in the SRA Accession GET"""
-    srr = "srr"
-    sra = "sra"
-    srp = "srp"
-    srs = "srs"
-    srx = "srx"
-
-class SRAAccessionType(str, Enum):
-    """Types of accessions that could be pulled in the SRA Accession GET"""
-    srr = "srr"
-    sra = "sra"
-    srp = "srp"
-    srs = "srs"
-    srx = "srx"
-
-app = FastAPI()
-
 class FetchAccessionParams(BaseModel):
     f"""
     Pydantic class for validating parameter inputs. terms is removed and called directly in fetch_nucleotide_accessions since
@@ -72,6 +56,7 @@ class FetchAccessionParams(BaseModel):
     timeout: int = Field(REQUEST_TIMEOUT, ge=0, le=500, description='Timeout for requests in seconds')
     num_workers: int = Field(NUM_WORKERS, ge=1, le=10, description='Number of concurrent workers')
     max_retries: int = Field(MAX_RETRIES, ge=0, le=10, description='Maximum number of retries per term')
+    validate: bool = Field(VALIDATE, description='Match search term to result strain name')
 
 class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
     model_config = {
@@ -82,6 +67,48 @@ class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
             }
         }
     }
+
+class FetchBioSampleAccessionResponse(RootModel[dict[str, Optional[str]]]):
+    model_config = {
+        'json_schema_extra': {
+            'example': {
+                'WAPHL-188937': 'SAMN51251905',
+                'WNV/USA/WAPHL-520992/2025': 'SAMN51590889'
+            }
+        }
+    }
+
+class FetchSRAAccessionResponse(RootModel[dict[str, dict[str, Optional[str]]]]):
+    model_config = {
+        'json_schema_extra': {
+            'example': {
+                'WA-PHL-033153': {
+                    'srr': 'SRR31232922',
+                    'sra': 'SRA2005952',
+                    'srp': 'SRP446846',
+                    'srs': 'SRS23111612',
+                    'srx': 'SRX26612931'
+                },
+                'USA/WA-CDC-LC1021650/2023': {
+                    'srr': 'SRR23850971',
+                    'sra': 'SRA1603506',
+                    'srp': 'SRP325386',
+                    'srs': 'SRS17034203',
+                    'srx': 'SRX19663757'
+                }
+            }
+        }
+    }
+
+class SRAAccessionType(str, Enum):
+    """Types of accessions that could be pulled in the SRA Accession GET"""
+    srr = "srr"
+    sra = "sra"
+    srp = "srp"
+    srs = "srs"
+    srx = "srx"
+
+app = FastAPI()
 
 @app.get('/fetch-nucleotide-accession/', response_model=FetchNucleotideAccessionResponse)
 async def fetch_nucleotide_accession(
@@ -115,16 +142,6 @@ async def fetch_nucleotide_accession(
     return results
 
 
-class FetchBioSampleAccessionResponse(RootModel[dict[str, Optional[str]]]):
-    model_config = {
-        'json_schema_extra': {
-            'example': {
-                'WAPHL-188937': 'SAMN51251905',
-                'WNV/USA/WAPHL-520992/2025': 'SAMN51590889'
-            }
-        }
-    }
-
 @app.get('/fetch-biosample-accession/', response_model=FetchBioSampleAccessionResponse)
 async def fetch_biosample_accession(
         terms: str = Query(...,
@@ -156,28 +173,6 @@ async def fetch_biosample_accession(
     )
     return results
 
-
-class FetchSRAAccessionResponse(RootModel[dict[str, dict[str, Optional[str]]]]):
-    model_config = {
-        'json_schema_extra': {
-            'example': {
-                'WA-PHL-033153': {
-                    'srr': 'SRR31232922',
-                    'sra': 'SRA2005952',
-                    'srp': 'SRP446846',
-                    'srs': 'SRS23111612',
-                    'srx': 'SRX26612931'
-                },
-                'USA/WA-CDC-LC1021650/2023': {
-                    'srr': 'SRR23850971',
-                    'sra': 'SRA1603506',
-                    'srp': 'SRP325386',
-                    'srs': 'SRS17034203',
-                    'srx': 'SRX19663757'
-                }
-            }
-        }
-    }
 
 @app.get('/fetch-sra-accession/', response_model=FetchSRAAccessionResponse)
 async def fetch_sra_accession(
@@ -251,12 +246,6 @@ async def fetch_db(term: str,
     # Set default return values
     ret_none = {a: None for a in acc} if db == 'sra' else None
 
-    # Set default return values
-    if db == 'sra':
-        ret_none = {a: None for a in acc}
-    else:
-        ret_none = None
-
     async with semaphore:
         data = await fetch_data(session=session,
                                 url=f'{eutils}/esearch.fcgi?db={db}&term={term}&retmode=json&{api_key_flag}',
@@ -325,8 +314,10 @@ async def fetch_db(term: str,
 
             accession = result.get(accession_tag)  # extract accession
             title = re.sub(SLASH_PATTERN, '/', result.get(strain_tag, ''))  # extract title & dedup slashes
-            if accession and accession_re.match(accession) and title_term.lower() in title.lower():
-                return term, accession
+
+            if accession and accession_re.match(accession):
+                if not params.validate or title_term.lower() in title.lower():
+                    return term, accession
 
         return term, ret_none
 
