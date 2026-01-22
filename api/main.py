@@ -56,7 +56,6 @@ class FetchAccessionParams(BaseModel):
     timeout: int = Field(REQUEST_TIMEOUT, ge=0, le=500, description='Timeout for requests in seconds')
     num_workers: int = Field(NUM_WORKERS, ge=1, le=10, description='Number of concurrent workers')
     max_retries: int = Field(MAX_RETRIES, ge=0, le=10, description='Maximum number of retries per term')
-    validate: bool = Field(VALIDATE, description='Match search term to result strain name')
 
 class FetchNucleotideAccessionResponse(RootModel[dict[str, Optional[str]]]):
     model_config = {
@@ -117,16 +116,18 @@ async def fetch_nucleotide_accession(
                            example='WA-PHL-007327,USA/WA-PHL-007328/2021',
                            examples=['WA-PHL-007327', 'USA/WA-PHL-007328/2021']
                            ),
-        params: FetchAccessionParams = Depends()
+        params: FetchAccessionParams = Depends(),
+        validate: bool = Query(VALIDATE, description='Whether to match search term to result strain name')
 ):
     f""" Fetches GenBank accession numbers for the provided search terms.
 
     ## Parameters
-    - **terms** (`str`, *required*): Search term to retrieve accession numbers.
+    - **terms** (`str`): Search term to retrieve accession numbers.
     - **api_key** (`str`, *optional*): User's NCBI API key.
-    - **timeout** (`int`, *optional*, default=`{REQUEST_TIMEOUT}`): Timeout for requests in seconds.
-    - **num_workers** (`int`, *optional*, default=`{NUM_WORKERS}`): Number of concurrent workers.
-    - **max_retries** (`int`, *optional*, default=`{MAX_RETRIES}`): Maximum number of retries per term.
+    - **timeout** (`int`, default=`{REQUEST_TIMEOUT}`): Timeout for requests in seconds.
+    - **num_workers** (`int`, default=`{NUM_WORKERS}`): Number of concurrent workers.
+    - **max_retries** (`int`, default=`{MAX_RETRIES}`): Maximum number of retries per term.
+    - **validate** (`bool`, default=`{VALIDATE}`): Whether to match search term to result strain name.
 
     ## Returns
     A `dict` containing the results, where:
@@ -137,7 +138,8 @@ async def fetch_nucleotide_accession(
         # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
         terms={term.strip() for term in terms.split(',')},
         params=params,
-        db='nucleotide'
+        db='nucleotide',
+        validate=validate
     )
     return results
 
@@ -149,7 +151,8 @@ async def fetch_biosample_accession(
                            example='WAPHL-188937,WNV/USA/WAPHL-520992/2025',
                            examples=['WAPHL-188937', 'WNV/USA/WAPHL-520992/2025']
                            ),
-        params: FetchAccessionParams = Depends()
+        params: FetchAccessionParams = Depends(),
+        validate: bool = Query(VALIDATE, description='Whether to match search term to result strain name')
 ):
     f""" Fetches BioSample accession numbers for the provided search terms.
 
@@ -159,6 +162,7 @@ async def fetch_biosample_accession(
     - **timeout** (`int`, *optional*, default=`{REQUEST_TIMEOUT}`): Timeout for requests in seconds.
     - **num_workers** (`int`, *optional*, default=`{NUM_WORKERS}`): Number of concurrent workers.
     - **max_retries** (`int`, *optional*, default=`{MAX_RETRIES}`): Maximum number of retries per term.
+    - **validate** (`bool`, default=`{VALIDATE}`): Whether to match search term to result strain name.
 
     ## Returns
     A `dict` containing the results, where:
@@ -169,7 +173,8 @@ async def fetch_biosample_accession(
         # Split terms and remove leading/trailing whitespace if there are multiple terms in the query string
         terms={term.strip() for term in terms.split(',')},
         params=params,
-        db='biosample'
+        db='biosample',
+        validate=validate
     )
     return results
 
@@ -220,6 +225,7 @@ async def fetch_db(term: str,
                    session: aiohttp.ClientSession,
                    semaphore: asyncio.Semaphore,
                    limiter: RateLimiter,
+                   validate: bool = False,
                    acc: list[SRAAccessionType] | None = None):
     """ Fetches database accession information for a given term using the NCBI Entrez API.
 
@@ -230,6 +236,7 @@ async def fetch_db(term: str,
         session (aiohttp.ClientSession): The active HTTP session to send requests.
         semaphore (asyncio.Semaphore): A semaphore to limit concurrent requests.
         limiter (RateLimiter): rate limiter to keep requests under NCBI's rps cap.
+        validate (bool): Whether to match search term to result strain name.
         acc (list[SRAAccessionType] | None): If querying SRA, specifies the types of accessions to return.
 
     Returns:
@@ -316,7 +323,7 @@ async def fetch_db(term: str,
             title = re.sub(SLASH_PATTERN, '/', result.get(strain_tag, ''))  # extract title & dedup slashes
 
             if accession:
-                if not params.validate or (accession_re.match(accession) and title_term.lower() in title.lower()):
+                if not validate or (accession_re.match(accession) and title_term.lower() in title.lower()):
                     return term, accession
 
         return term, ret_none
@@ -358,7 +365,7 @@ async def fetch_data(session, url, limiter, params, retries):
         return await fetch_data(session, url, limiter, params, retries + 1)
 
 
-async def fetch_all_db(terms, params, db, acc=None):
+async def fetch_all_db(terms, params, db, acc=None, validate=False):
     """ Fetches database accession numbers for a list of terms in parallel using asynchronous workers.
 
     Parameters:
@@ -366,6 +373,7 @@ async def fetch_all_db(terms, params, db, acc=None):
         params (FetchAccessionParams): API query parameters.
         db (str): The NCBI database to search within.
         acc (list[SRAAccessionType] | None): If querying SRA, specifies the types of accessions to return.
+        validate (bool): Whether to match search term to result strain name.
 
     Returns:
         dict: A dictionary where each key is a term, and each value is its corresponding database accession result.
@@ -384,12 +392,13 @@ async def fetch_all_db(terms, params, db, acc=None):
         async def run(term):
             try:
                 key, result = await fetch_db(term=term,
-                                            params=params,
-                                            db=db,
-                                            session=session,
-                                            semaphore=semaphore,
-                                            limiter=limiter,
-                                            acc=acc)
+                                             params=params,
+                                             db=db,
+                                             session=session,
+                                             semaphore=semaphore,
+                                             limiter=limiter,
+                                             acc=acc,
+                                             validate=validate)
                 results[key] = result
             except Exception:
                 results[term] = None
