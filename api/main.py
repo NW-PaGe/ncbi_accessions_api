@@ -12,7 +12,7 @@ from enum import Enum
 MAX_RETRIES = 5
 REQUEST_TIMEOUT = 15
 NUM_WORKERS = 5
-VALIDATE = True
+VALIDATE = False
 
 
 # Regex patters:
