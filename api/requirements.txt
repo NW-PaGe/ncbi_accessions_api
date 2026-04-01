@@ -1,5 +1,5 @@
 uv==0.9.6
-aiohttp==3.13.3
+aiohttp==3.13.4
 fastapi[standard]==0.128.0
 requests==2.32.5
 rsconnect-python==1.25.2
